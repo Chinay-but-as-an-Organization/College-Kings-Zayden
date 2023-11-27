@@ -1,30 +1,26 @@
+use serenity::all::{
+    ChannelId, CommandDataOption, CommandDataOptionValue, CommandInteraction, CommandOptionType,
+    Context, CreateCommand, CreateCommandOption, GuildId, MessageId, Permissions, ReactionType,
+};
+
 use crate::sqlx_lib::{create_reaction_role, delete_reaction_role};
 use crate::utils::respond_with_message;
-use serenity::builder::CreateApplicationCommand;
-use serenity::model::id::ChannelId;
-use serenity::model::prelude::application_command::{
-    ApplicationCommandInteraction, CommandDataOption, CommandDataOptionValue,
-};
-use serenity::model::prelude::command::CommandOptionType;
-use serenity::model::prelude::{GuildId, ReactionType};
-use serenity::model::Permissions;
-use serenity::prelude::Context;
 
 async fn add(
     ctx: &Context,
-    interaction: &ApplicationCommandInteraction,
-    subcommand: &CommandDataOption,
+    interaction: &CommandInteraction,
+    options: &[CommandDataOption],
     guild_id: GuildId,
-    channel: ChannelId,
-    message_id: &i64,
+    channel_id: ChannelId,
+    message_id: MessageId,
     emoji: &str,
 ) -> Result<(), serenity::Error> {
-    let role = match subcommand.options[3].resolved.as_ref() {
-        Some(CommandDataOptionValue::Role(role)) => role,
+    let role_id = match options[3].value.as_role_id() {
+        Some(role_id) => role_id,
         _ => return respond_with_message(ctx, interaction, "Please provide a valid role").await,
     };
 
-    let message = match channel.message(ctx, *message_id as u64).await {
+    let message = match channel_id.message(ctx, message_id).await {
         Ok(message) => message,
         Err(_) => {
             return respond_with_message(ctx, interaction, "Please provide a valid message id")
@@ -32,19 +28,17 @@ async fn add(
         }
     };
 
-    match create_reaction_role(
-        guild_id.0 as i64,
-        channel.0 as i64,
-        message_id,
-        role.id.0 as i64,
+    if create_reaction_role(
+        guild_id.get() as i64,
+        channel_id.get() as i64,
+        message_id.get() as i64,
+        role_id.get() as i64,
         emoji,
     )
     .await
+    .is_err()
     {
-        Ok(_) => {}
-        Err(_) => {
-            return respond_with_message(ctx, interaction, "Error adding reaction role").await
-        }
+        return respond_with_message(ctx, interaction, "Error adding reaction role").await;
     }
 
     message
@@ -55,13 +49,13 @@ async fn add(
 
 async fn remove(
     ctx: &Context,
-    interaction: &ApplicationCommandInteraction,
+    interaction: &CommandInteraction,
+    channel_id: ChannelId,
     guild_id: GuildId,
-    channel: ChannelId,
-    message_id: &i64,
+    message_id: MessageId,
     emoji: &str,
 ) -> Result<(), serenity::Error> {
-    let message = match channel.message(ctx, *message_id as u64).await {
+    let message = match channel_id.message(ctx, message_id).await {
         Ok(message) => message,
         Err(_) => {
             return respond_with_message(ctx, interaction, "Please provide a valid message id")
@@ -69,11 +63,16 @@ async fn remove(
         }
     };
 
-    match delete_reaction_role(guild_id.0 as i64, channel.0 as i64, message_id, emoji).await {
-        Ok(_) => {}
-        Err(_) => {
-            return respond_with_message(ctx, interaction, "Error deleting reaction role").await
-        }
+    if delete_reaction_role(
+        guild_id.get() as i64,
+        channel_id.get() as i64,
+        message_id.get() as i64,
+        emoji,
+    )
+    .await
+    .is_err()
+    {
+        return respond_with_message(ctx, interaction, "Error deleting reaction role").await;
     }
 
     match message
@@ -85,10 +84,7 @@ async fn remove(
     }
 }
 
-pub async fn run(
-    ctx: &Context,
-    interaction: &ApplicationCommandInteraction,
-) -> Result<(), serenity::Error> {
+pub async fn run(ctx: &Context, interaction: &CommandInteraction) -> Result<(), serenity::Error> {
     let guild_id = match interaction.guild_id {
         Some(guild_id) => guild_id,
         None => {
@@ -101,108 +97,121 @@ pub async fn run(
         }
     };
 
-    let subcommand = &interaction.data.options[0];
+    let command = &interaction.data.options[0];
 
-    let channel = match subcommand.options[0].resolved.as_ref() {
-        Some(CommandDataOptionValue::Channel(channel)) => channel.id,
+    let options = match &command.value {
+        CommandDataOptionValue::SubCommand(options) => options,
+        _ => return respond_with_message(ctx, interaction, "Invalid subcommand").await,
+    };
+
+    let channel_id = match options[0].value.as_channel_id() {
+        Some(channel) => channel,
         _ => return respond_with_message(ctx, interaction, "Please provide a valid channel").await,
     };
 
-    let message_id = match subcommand.options[1].resolved.as_ref() {
-        Some(CommandDataOptionValue::Integer(message_id)) => message_id,
+    let message_id = match options[1]
+        .value
+        .as_str()
+        .and_then(|message_id| message_id.parse::<u64>().ok())
+    {
+        Some(message_id) => MessageId::new(message_id),
         _ => {
             return respond_with_message(ctx, interaction, "Please provide a valid message id")
                 .await
         }
     };
 
-    let emoji = match subcommand.options[2].resolved.as_ref() {
-        Some(CommandDataOptionValue::String(emoji)) => emoji,
+    let emoji = match options[2].value.as_str() {
+        Some(emoji) => emoji,
         _ => return respond_with_message(ctx, interaction, "Please provide a valid emoji").await,
     };
 
-    return match subcommand.name.as_str() {
+    match command.name.as_str() {
         "add" => {
             add(
                 ctx,
                 interaction,
-                subcommand,
+                options,
                 guild_id,
-                channel,
+                channel_id,
                 message_id,
                 emoji,
             )
-            .await
+                    .await
         }
-        "remove" => remove(ctx, interaction, guild_id, channel, message_id, emoji).await,
+        "remove" => remove(ctx, interaction, channel_id, guild_id, message_id, emoji).await,
         _ => respond_with_message(ctx, interaction, "Invalid subcommand").await,
-    };
+    }
 }
 
-pub fn register(command: &mut CreateApplicationCommand) -> &mut CreateApplicationCommand {
-    command
-        .name("reaction_role")
+pub fn register() -> CreateCommand {
+    CreateCommand::new("reaction_role")
         .description("Adds or removes a reaction role")
         .default_member_permissions(Permissions::MANAGE_MESSAGES)
-        .create_option(|option| {
-            option
-                .name("add")
-                .description("Adds a reaction role")
-                .kind(CommandOptionType::SubCommand)
-                .create_sub_option(|sub_option| {
-                    sub_option
-                        .name("channel")
-                        .description("The channel the message is in")
-                        .kind(CommandOptionType::Channel)
-                        .required(true)
-                })
-                .create_sub_option(|sub_option| {
-                    sub_option
-                        .name("message_id")
-                        .description("The message id of the reaction role message")
-                        .kind(CommandOptionType::Integer)
-                        .required(true)
-                })
-                .create_sub_option(|sub_option| {
-                    sub_option
-                        .name("emoji")
-                        .description("The emoji of the reaction role")
-                        .kind(CommandOptionType::String)
-                        .required(true)
-                })
-                .create_sub_option(|sub_option| {
-                    sub_option
-                        .name("role")
-                        .description("The role to add when the emoji is reacted to")
-                        .kind(CommandOptionType::Role)
-                        .required(true)
-                })
-        })
-        .create_option(|option| {
-            option
-                .name("remove")
-                .description("Removes a reaction role")
-                .kind(CommandOptionType::SubCommand)
-                .create_sub_option(|sub_option| {
-                    sub_option
-                        .name("channel")
-                        .description("The channel the message is in")
-                        .kind(CommandOptionType::Channel)
-                        .required(true)
-                })
-                .create_sub_option(|sub_option| {
-                    sub_option
-                        .name("message_id")
-                        .description("The message id of the reaction role message")
-                        .kind(CommandOptionType::Integer)
-                        .required(true)
-                })
-                .create_sub_option(|sub_option| {
-                    sub_option
-                        .name("emoji")
-                        .description("The emoji of the reaction role")
-                        .kind(CommandOptionType::String)
-                        .required(true)
-                })
-        })
+        .add_option(
+            CreateCommandOption::new(CommandOptionType::SubCommand, "add", "Adds a reaction role")
+                .add_sub_option(
+                    CreateCommandOption::new(
+                        CommandOptionType::Channel,
+                        "channel",
+                        "The channel the message is in",
+                    )
+                    .required(true),
+                )
+                .add_sub_option(
+                    CreateCommandOption::new(
+                        CommandOptionType::String,
+                        "message_id",
+                        "The message id of the reaction role message",
+                    )
+                    .required(true),
+                )
+                .add_sub_option(
+                    CreateCommandOption::new(
+                        CommandOptionType::String,
+                        "emoji",
+                        "The emoji of the reaction role",
+                    )
+                    .required(true),
+                )
+                .add_sub_option(
+                    CreateCommandOption::new(
+                        CommandOptionType::Role,
+                        "role",
+                        "The role to add when the emoji is reacted to",
+                    )
+                    .required(true),
+                ),
+        )
+        .add_option(
+            CreateCommandOption::new(
+                CommandOptionType::SubCommand,
+                "remove",
+                "Removes a reaction role",
+            )
+            .add_sub_option(
+                CreateCommandOption::new(
+                    CommandOptionType::Channel,
+                    "channel",
+                    "The channel the message is in",
+                )
+                .required(true),
+            )
+            .add_sub_option(
+                CreateCommandOption::new(
+                    CommandOptionType::String,
+                    "message_id",
+                    "The message id of the reaction role message",
+                )
+                .required(true),
+            )
+            .add_sub_option(
+                CreateCommandOption::new(
+                    CommandOptionType::String,
+                    "emoji",
+                    "The emoji of the reaction role",
+                )
+                .required(true),
+            ),
+        )
 }

@@ -1,18 +1,15 @@
-use crate::utils::{edit_response_with_message, respond_with_message};
-use serenity::builder::CreateApplicationCommand;
-use serenity::model::id::ChannelId;
-use serenity::model::prelude::application_command::ApplicationCommandInteraction;
-use serenity::model::prelude::{GuildChannel, ReactionType};
-use serenity::prelude::Context;
-use std::string::ToString;
 use std::time;
+
+use serenity::all::{
+    ChannelId, CommandInteraction, Context, CreateCommand, CreateEmbed, CreateMessage,
+    GuildChannel, ReactionType,
+};
+
+use crate::utils::{edit_response_with_message, respond_with_message};
 
 const SUGGESTION_CHANNEL_ID: u64 = 1068790374996377671;
 
-pub async fn run(
-    ctx: &Context,
-    interaction: &ApplicationCommandInteraction,
-) -> Result<(), serenity::Error> {
+pub async fn run(ctx: &Context, interaction: &CommandInteraction) -> Result<(), serenity::Error> {
     let start_time = time::Instant::now();
 
     let guild_id = match interaction.guild_id {
@@ -27,7 +24,7 @@ pub async fn run(
         }
     };
 
-    let suggestion_channel = ChannelId(SUGGESTION_CHANNEL_ID);
+    let suggestion_channel = ChannelId::new(SUGGESTION_CHANNEL_ID);
 
     interaction.defer(&ctx).await?;
 
@@ -54,7 +51,7 @@ pub async fn run(
         let reactions = match thread
             .reaction_users(
                 &ctx,
-                thread.id.0,
+                thread.id.get(),
                 ReactionType::Unicode("👍".to_string()),
                 Some(100),
                 None,
@@ -71,23 +68,29 @@ pub async fn run(
 
     let elapsed_time = start_time.elapsed();
 
+    let fields = thread_reaction_counts[..10]
+        .iter()
+        .enumerate()
+        .map(|(i, (thread, count))| {
+            (
+                format!("{}. 👍: {}", i + 1, count),
+                format!("Link: {}", thread),
+                false,
+            )
+        })
+        .collect::<Vec<(String, String, bool)>>();
+
     let result = interaction
         .user
-        .dm(&ctx, |f| {
-            f.embed(|e| {
-                e.title("Top 10 suggestions");
-                e.description("Here are the top 10 suggestions, sorted by votes.");
-
-                for (i, (thread, count)) in thread_reaction_counts[..10].iter().enumerate() {
-                    e.field(
-                        format!("{}. 👍: {}", i + 1, count),
-                        format!("Link: {}", thread),
-                        false,
-                    );
-                }
-                e
-            })
-        })
+        .dm(
+            &ctx,
+            CreateMessage::new().add_embed(
+                CreateEmbed::new()
+                    .title("Top 10 suggestions")
+                    .description("Here are the top 10 suggestions, sorted by votes.")
+                    .fields(fields),
+            ),
+        )
         .await;
 
     if result.is_err() {
@@ -112,8 +115,7 @@ pub async fn run(
     Ok(())
 }
 
-pub fn register(command: &mut CreateApplicationCommand) -> &mut CreateApplicationCommand {
-    command
-        .name("fetch_suggestions")
+pub fn register() -> CreateCommand {
+    CreateCommand::new("fetch_suggestions")
         .description("Fetch suggestions from the suggestion channel")
 }

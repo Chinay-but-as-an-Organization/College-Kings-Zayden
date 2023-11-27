@@ -1,13 +1,9 @@
+use serenity::all::{CommandInteraction, Context, CreateCommand};
+
 use crate::sqlx_lib::{get_spoiler_channel_ids, get_support_channel_ids};
 use crate::utils::respond_with_message;
-use serenity::builder::CreateApplicationCommand;
-use serenity::model::prelude::application_command::ApplicationCommandInteraction;
-use serenity::prelude::Context;
 
-pub async fn run(
-    ctx: &Context,
-    interaction: &ApplicationCommandInteraction,
-) -> Result<(), serenity::Error> {
+pub async fn run(ctx: &Context, interaction: &CommandInteraction) -> Result<(), serenity::Error> {
     let guild_id = match interaction.guild_id {
         Some(guild_id) => guild_id,
         None => {
@@ -20,7 +16,7 @@ pub async fn run(
         }
     };
 
-    let support_thread_ids = match get_support_channel_ids(guild_id.0 as i64).await {
+    let support_thread_ids = match get_support_channel_ids(guild_id.get() as i64).await {
         Ok(support_thread_ids) => support_thread_ids,
         Err(_) => {
             return respond_with_message(ctx, interaction, "Error retrieving support channel").await
@@ -34,7 +30,7 @@ pub async fn run(
         }
     };
 
-    let spoiler_thread_ids = match get_spoiler_channel_ids(guild_id.0 as i64).await {
+    let spoiler_thread_ids = match get_spoiler_channel_ids(guild_id.get() as i64).await {
         Ok(support_thread_ids) => support_thread_ids,
         Err(_) => {
             return respond_with_message(ctx, interaction, "Error retrieving spoiler channel").await
@@ -51,8 +47,6 @@ pub async fn run(
     respond_with_message(ctx, interaction, &format!("Please keep all conversations about the new update to <#{}>\nIf you have any bugs or questions please post them in <#{}>", spoiler_thread_id, support_thread_id)).await
 }
 
-pub fn register(command: &mut CreateApplicationCommand) -> &mut CreateApplicationCommand {
-    command
-        .name("spoilers")
-        .description("Disclaimer about spoilers")
+pub fn register() -> CreateCommand {
+    CreateCommand::new("spoilers").description("Disclaimer about spoilers")
 }

@@ -1,6 +1,7 @@
+use std::env;
+
 use reqwest::Client;
 use serde_json::json;
-use std::env;
 
 const ROOT_URL: &str = "https://api.openai.com/v1/";
 

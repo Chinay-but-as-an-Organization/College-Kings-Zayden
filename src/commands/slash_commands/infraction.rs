@@ -1,16 +1,15 @@
+use std::cmp;
+
+use chrono::{Duration, Months, Utc};
+use serenity::all::{CommandDataOptionValue, CommandInteraction, CommandOptionType, CreateEmbed};
+use serenity::builder::{CreateCommand, CreateCommandOption, CreateMessage};
+use serenity::model::{Permissions, Timestamp};
+use serenity::model::prelude::{GuildId, Member};
+use serenity::prelude::Context;
+
 use crate::infraction_type::InfractionType;
 use crate::sqlx_lib::{create_user_infraction, get_user_infractions};
 use crate::utils::respond_with_message;
-use chrono::{Duration, Months, Utc};
-use serenity::builder::CreateApplicationCommand;
-use serenity::model::prelude::application_command::{
-    ApplicationCommandInteraction, CommandDataOptionValue,
-};
-use serenity::model::prelude::command::CommandOptionType;
-use serenity::model::prelude::{GuildId, Member};
-use serenity::model::{Permissions, Timestamp};
-use serenity::prelude::Context;
-use std::cmp;
 
 async fn warn(
     ctx: &Context,
@@ -20,27 +19,27 @@ async fn warn(
     points: i64,
     reason: String,
 ) -> Result<String, String> {
+    let partial_guild = guild_id.to_partial_guild(ctx).await.unwrap();
+
     let _ = member
         .user
-        .dm(ctx, |message| {
-            message.embed(|embed| {
-                embed.title("You have been warned");
-                embed.description(format!(
-                    "You have been warned in {} for the following reason: {}",
-                    guild_id.name(&ctx).unwrap(),
-                    reason
-                ));
-                embed
-            })
-        })
+        .dm(
+            ctx,
+            CreateMessage::new().add_embed(
+                CreateEmbed::new()
+                    .title("You have been warned")
+                    .description(format!(
+                        "You have been warned in {} for the following reason: {}",
+                        partial_guild.name, reason
+                    )),
+            ),
+        )
         .await;
 
-    let user_id = member.user.id.0 as i64;
+    let user_id = member.user.id.get() as i64;
     let username = member.user.name.as_str();
-    let guild_id = guild_id.0 as i64;
+    let guild_id = guild_id.get() as i64;
     let infraction_type = InfractionType::Warn;
-    let moderator_id = moderator.user.id.0 as i64;
-    let moderator_name = moderator.user.name.as_str();
     let points = points as i32;
     let reason = reason.as_str();
 
@@ -49,8 +48,7 @@ async fn warn(
         username,
         guild_id,
         infraction_type,
-        moderator_id,
-        moderator_name,
+        moderator.user,
         points,
         reason,
     )
@@ -87,25 +85,24 @@ async fn mute(
 
     let _ = member
         .user
-        .dm(ctx, |message| {
-            message.embed(|embed| {
-                embed.title("You have been muted");
-                embed.description(format!(
-                    "You have been muted in {} for the following reason: {}",
-                    guild_id.name(&ctx).unwrap(),
-                    reason
-                ));
-                embed
-            })
-        })
+        .dm(
+            ctx,
+            CreateMessage::new().add_embed(
+                CreateEmbed::new()
+                    .title("You have been muted")
+                    .description(format!(
+                        "You have been muted in {} for the following reason: {}",
+                        guild_id.to_partial_guild(ctx).await.unwrap().name,
+                        reason
+                    )),
+            ),
+        )
         .await;
 
-    let user_id = member.user.id.0 as i64;
+    let user_id = member.user.id.get() as i64;
     let username = member.user.name.as_str();
-    let guild_id = guild_id.0 as i64;
+    let guild_id = guild_id.get() as i64;
     let infraction_type = InfractionType::Mute;
-    let moderator_id = moderator.user.id.0 as i64;
-    let moderator_name = moderator.user.name.as_str();
     let points = points as i32;
     let reason = reason.as_str();
 
@@ -114,8 +111,7 @@ async fn mute(
         username,
         guild_id,
         infraction_type,
-        moderator_id,
-        moderator_name,
+        moderator.user,
         points,
         reason,
     )
@@ -138,31 +134,30 @@ async fn ban(
 ) -> Result<String, String> {
     let result = member.ban_with_reason(ctx, 7, &reason).await;
 
-    if let Err(_) = result {
+    if result.is_err() {
         return Err("Failed to ban user".to_string());
     }
 
     let _ = member
         .user
-        .dm(ctx, |message| {
-            message.embed(|embed| {
-                embed.title("You have been banned");
-                embed.description(format!(
-                    "You have been banned from {} for the following reason: {}",
-                    guild_id.name(&ctx).unwrap(),
-                    reason
-                ));
-                embed
-            })
-        })
+        .dm(
+            ctx,
+            CreateMessage::new().add_embed(
+                CreateEmbed::new()
+                    .title("You have been banned")
+                    .description(format!(
+                        "You have been banned from {} for the following reason: {}",
+                        guild_id.to_partial_guild(ctx).await.unwrap().name,
+                        reason
+                    )),
+            ),
+        )
         .await;
 
-    let user_id = member.user.id.0 as i64;
+    let user_id = member.user.id.get() as i64;
     let username = member.user.name.as_str();
-    let guild_id = guild_id.0 as i64;
+    let guild_id = guild_id.get() as i64;
     let infraction_type = InfractionType::Ban;
-    let moderator_id = moderator.user.id.0 as i64;
-    let moderator_name = moderator.user.name.as_str();
     let points = points as i32;
     let reason = reason.as_str();
 
@@ -171,8 +166,7 @@ async fn ban(
         username,
         guild_id,
         infraction_type,
-        moderator_id,
-        moderator_name,
+        moderator.user,
         points,
         reason,
     )
@@ -186,7 +180,7 @@ async fn ban(
 }
 
 fn get_option_by_name(
-    interaction: &ApplicationCommandInteraction,
+    interaction: &CommandInteraction,
     name: &str,
 ) -> Option<CommandDataOptionValue> {
     match interaction
@@ -196,15 +190,12 @@ fn get_option_by_name(
         .into_iter()
         .find(|option| option.name == name)
     {
-        Some(option) => option.resolved,
+        Some(option) => Some(option.value),
         None => None,
     }
 }
 
-pub async fn run(
-    ctx: &Context,
-    interaction: &ApplicationCommandInteraction,
-) -> Result<(), serenity::Error> {
+pub async fn run(ctx: &Context, interaction: &CommandInteraction) -> Result<(), serenity::Error> {
     let author_id = interaction.user.id;
 
     let guild_id = match interaction.guild_id {
@@ -219,9 +210,9 @@ pub async fn run(
         }
     };
 
-    let user = match interaction.data.options[0].resolved.as_ref() {
-        Some(CommandDataOptionValue::User(user, _member)) => user,
-        _ => return respond_with_message(ctx, interaction, "Please provide a valid user").await,
+    let user = match interaction.data.options[0].value.as_user_id() {
+        Some(user) => user,
+        None => return respond_with_message(ctx, interaction, "Please provide a valid user").await,
     };
 
     let moderator = match guild_id.member(&ctx, &author_id).await {
@@ -229,7 +220,7 @@ pub async fn run(
         Err(_) => return respond_with_message(ctx, interaction, "Invalid moderator").await,
     };
 
-    let member = match guild_id.member(&ctx, user.id).await {
+    let member = match guild_id.member(&ctx, user).await {
         Ok(member) => member,
         Err(_) => {
             return respond_with_message(ctx, interaction, "User not found in this server").await
@@ -246,7 +237,7 @@ pub async fn run(
         _ => "No reason provided".to_string(),
     };
 
-    let user_infractions = match get_user_infractions(member.user.id.0 as i64).await {
+    let user_infractions = match get_user_infractions(member.user.id.get() as i64).await {
         Ok(user_infractions) => user_infractions,
         Err(_) => return respond_with_message(ctx, interaction, "Error getting user config").await,
     };
@@ -317,28 +308,27 @@ pub async fn run(
     }
 }
 
-pub fn register(command: &mut CreateApplicationCommand) -> &mut CreateApplicationCommand {
-    command
+pub fn register() -> CreateCommand {
+    CreateCommand::new("infraction")
         .name("infraction")
         .description("Warn, mute, or ban a user")
         .default_member_permissions(Permissions::MODERATE_MEMBERS)
-        .create_option(|option| {
-            option
-                .name("user")
-                .description("The user to warn, mute, or ban")
-                .kind(CommandOptionType::User)
-                .required(true)
-        })
-        .create_option(|option| {
-            option
-                .name("points")
-                .description("The number of infractions to give the user")
-                .kind(CommandOptionType::Integer)
-        })
-        .create_option(|option| {
-            option
-                .name("reason")
-                .description("The reason for the infraction")
-                .kind(CommandOptionType::String)
-        })
+        .add_option(
+            CreateCommandOption::new(
+                CommandOptionType::User,
+                "user",
+                "The user to warn, mute, or ban",
+            )
+            .required(true),
+        )
+        .add_option(CreateCommandOption::new(
+            CommandOptionType::Integer,
+            "points",
+            "The number of infractions to give the user",
+        ))
+        .add_option(CreateCommandOption::new(
+            CommandOptionType::String,
+            "reason",
+            "The reason for the infraction",
+        ))
 }

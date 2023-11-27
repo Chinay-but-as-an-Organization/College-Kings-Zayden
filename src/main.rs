@@ -1,3 +1,9 @@
+use std::env;
+
+use dotenvy::dotenv;
+use serenity::prelude::GatewayIntents;
+use serenity::Client;
+
 mod chatgpt_lib;
 mod commands;
 mod handler;
@@ -6,14 +12,9 @@ mod models;
 mod sqlx_lib;
 mod utils;
 
-use dotenvy::dotenv;
-use serenity::prelude::GatewayIntents;
-use serenity::Client;
-use std::env;
-
 #[tokio::main]
 async fn main() {
-    dotenv().ok();
+    dotenv().expect("Failed to read .env file");
 
     let token = &env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
 
